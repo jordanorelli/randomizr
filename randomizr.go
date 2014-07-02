@@ -18,7 +18,7 @@ func randomString(n int) string {
 }
 
 func main() {
-    for t := range time.Tick(25 * time.Millisecond) {
+    for t := range time.Tick(100 * time.Millisecond) {
         fmt.Printf("%v %v %v\n", t.UnixNano(), randomString(32), randomString(32))
     }
 }
