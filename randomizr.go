@@ -75,6 +75,7 @@ START:
 				fmt.Printf("ERROR: unable to write line: %v", err)
 			}
 		case <-hup:
+			fmt.Fprintf(f, "%v HUP\n", time.Now().UnixNano())
 			f.Close()
 			goto START
 		}
@@ -98,7 +99,7 @@ func writePid() {
 		fmt.Fprintf(os.Stderr, "ERROR unable to open pidfile: %v", err)
 		return
 	}
-	fmt.Fprintf(f, "%d\n", os.Getpid())
+	fmt.Fprintln(f, os.Getpid())
 }
 
 func main() {
