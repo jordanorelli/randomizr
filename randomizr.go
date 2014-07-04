@@ -11,11 +11,13 @@ import (
 )
 
 var (
-	fname     string
-	ftruncate bool
-	reopen    bool
-	freq      float64
-	pidfile   string
+	fname     string        // output filename
+	freq      float64       // frequency at which lines are written
+	ftruncate bool          // whether or not to truncate file on open
+	pidfile   string        // path of pidfile to write out
+	reopen    bool          // whether or not to reopen the file handle on every line write
+	tsformat  string        // timestamp format
+	ts        func() string // function to get a timestamp string
 )
 
 // generates a pseudorandom string of length n that is composed of alphanumeric
@@ -75,7 +77,7 @@ START:
 				fmt.Printf("ERROR: unable to write line: %v", err)
 			}
 		case <-hup:
-			fmt.Fprintf(f, "%v HUP\n", time.Now().UnixNano())
+			fmt.Fprintf(f, "%s HUP\n", ts())
 			f.Close()
 			goto START
 		}
@@ -102,20 +104,51 @@ func writePid() {
 	fmt.Fprintln(f, os.Getpid())
 }
 
-func main() {
+func flags() {
 	flag.Parse()
+	switch tsformat {
+	case "":
+		ts = func() string {
+			t := time.Now()
+			return fmt.Sprintf("%s %4.4d", t.Format("15:04:05"), t.Nanosecond()/1e5)
+		}
+	case "ns":
+		ts = func() string {
+			t := time.Now()
+			return fmt.Sprintf("%d", t.UnixNano())
+		}
+	case "ms":
+		ts = func() string {
+			t := time.Now()
+			return fmt.Sprintf("%d", t.UnixNano()/1e3)
+		}
+	case "epoch", "unix":
+		ts = func() string {
+			t := time.Now()
+			return fmt.Sprintf("%d", t.Unix())
+		}
+	default:
+		ts = func() string {
+			return time.Now().Format(tsformat)
+		}
+	}
+}
+
+func main() {
+	flags()
 	writePid()
 	c := make(chan string)
 
 	writeLines(c)
 
-	for t := range time.Tick(time.Duration(1e9 / freq)) {
-		c <- fmt.Sprintf("%v %v %v\n", t.UnixNano(), randomString(32), randomString(32))
+	for _ = range time.Tick(time.Duration(1e9 / freq)) {
+		c <- fmt.Sprintf("%s %s %s\n", ts(), randomString(32), randomString(32))
 	}
 }
 
 func init() {
 	flag.StringVar(&fname, "file", "", "destination file to which random data will be written")
+	flag.StringVar(&tsformat, "ts-format", "", "timestamp format")
 	flag.StringVar(&pidfile, "pidfile", "", "file to which a pid is written")
 	flag.BoolVar(&ftruncate, "truncate", false, "truncate file on opening instead of appending")
 	flag.BoolVar(&reopen, "reopen", false, "reopen file handle on every write instead of using a persistent handle")
