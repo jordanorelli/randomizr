@@ -6,19 +6,67 @@ import (
 	"math/rand"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 )
 
 var (
-	fname     string        // output filename
-	freq      float64       // frequency at which lines are written
-	ftruncate bool          // whether or not to truncate file on open
-	pidfile   string        // path of pidfile to write out
-	reopen    bool          // whether or not to reopen the file handle on every line write
-	tsformat  string        // timestamp format
-	ts        func() string // function to get a timestamp string
+	fname      string        // output filename
+	freq       float64       // frequency at which lines are written
+	ftruncate  bool          // whether or not to truncate file on open
+	pidfile    string        // path of pidfile to write out
+	reopen     bool          // whether or not to reopen the file handle on every line write
+	tsformat   string        // timestamp format
+	lineLength lengthArg     // length of the lines to be generated
+	ts         func() string // function to get a timestamp string
+	line       func() string // function to generate a line
 )
+
+type lengthArg struct {
+	n      int
+	random bool
+}
+
+func (l *lengthArg) String() string {
+	return "length."
+}
+
+func (l *lengthArg) Set(v string) error {
+	if i, err := strconv.Atoi(v); err == nil {
+		*l = lengthArg{n: i}
+		return nil
+	}
+
+	switch v {
+	case "rand", "random":
+		*l = lengthArg{random: true}
+		return nil
+	default:
+		return fmt.Errorf("bad length arg: %s", v)
+	}
+}
+
+func (l *lengthArg) mkLineFn() (func() string, error) {
+	if ts == nil {
+		ts = mkTsFn()
+	}
+	tsLen := len(ts())
+	if l.random {
+		return func() string {
+			return randomString(rand.Intn(80 - tsLen))
+		}, nil
+	}
+	if l.n == 0 {
+		l.n = 80
+	}
+	if !l.random && tsLen > l.n {
+		return nil, fmt.Errorf("line length %d is too small for timestamps like %s", l.n, ts())
+	}
+	return func() string {
+		return randomString(l.n - tsLen)
+	}, nil
+}
 
 // generates a pseudorandom string of length n that is composed of alphanumeric
 // characters.
@@ -104,45 +152,54 @@ func writePid() {
 	fmt.Fprintln(f, os.Getpid())
 }
 
-func flags() {
-	flag.Parse()
+func mkTsFn() func() string {
 	switch tsformat {
 	case "":
-		ts = func() string {
+		return func() string {
 			t := time.Now()
 			return fmt.Sprintf("%s %4.4d", t.Format("15:04:05"), t.Nanosecond()/1e5)
 		}
 	case "ns":
-		ts = func() string {
+		return func() string {
 			t := time.Now()
 			return fmt.Sprintf("%d", t.UnixNano())
 		}
 	case "ms":
-		ts = func() string {
+		return func() string {
 			t := time.Now()
 			return fmt.Sprintf("%d", t.UnixNano()/1e3)
 		}
 	case "epoch", "unix":
-		ts = func() string {
+		return func() string {
 			t := time.Now()
 			return fmt.Sprintf("%d", t.Unix())
 		}
 	default:
-		ts = func() string {
+		return func() string {
 			return time.Now().Format(tsformat)
 		}
 	}
 }
 
+func flags() (err error) {
+	flag.Parse()
+	ts = mkTsFn()
+	line, err = lineLength.mkLineFn()
+	return
+}
+
 func main() {
-	flags()
+	if err := flags(); err != nil {
+		fmt.Println(err.Error())
+		os.Exit(1)
+	}
 	writePid()
 	c := make(chan string)
 
 	writeLines(c)
 
 	for _ = range time.Tick(time.Duration(1e9 / freq)) {
-		c <- fmt.Sprintf("%s %s %s\n", ts(), randomString(32), randomString(32))
+		c <- fmt.Sprintf("%s %s\n", ts(), line())
 	}
 }
 
@@ -153,5 +210,6 @@ func init() {
 	flag.BoolVar(&ftruncate, "truncate", false, "truncate file on opening instead of appending")
 	flag.BoolVar(&reopen, "reopen", false, "reopen file handle on every write instead of using a persistent handle")
 	flag.Float64Var(&freq, "freq", 10, "frequency in hz at which lines will be written")
+	flag.Var(&lineLength, "line-length", "length of the lines to be generated (in bytes)")
 	rand.Seed(time.Now().UnixNano())
 }
