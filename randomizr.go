@@ -67,6 +67,9 @@ func (w wordBag) lengths() []int {
 func (w wordBag) randomWordN(n int) string {
 	words, ok := w[n]
 	if ok {
+		if len(words) == 1 {
+			return words[0]
+		}
 		return words[rand.Intn(len(words)-1)]
 	}
 	return ""
