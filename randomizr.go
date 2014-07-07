@@ -1,17 +1,23 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"flag"
 	"fmt"
+	"io"
 	"math/rand"
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
 
 var (
+	dictionary string        // pathname for a file containing dictionary words
+	words      wordBag       // index of words by length
 	fname      string        // output filename
 	freq       float64       // frequency at which lines are written
 	ftruncate  bool          // whether or not to truncate file on open
@@ -23,6 +29,82 @@ var (
 	line       func() string // function to generate a line
 )
 
+type wordBag map[int][]string
+
+func (w wordBag) readAll(r io.Reader) error {
+	br := bufio.NewReader(r)
+
+ReadLines:
+	for {
+		line, err := br.ReadString('\n')
+		switch err {
+		case io.EOF:
+			break ReadLines
+		case nil:
+			w.add(strings.TrimSpace(line))
+		default:
+			return fmt.Errorf("unable to add word to wordBag: %s", err.Error())
+		}
+	}
+	return nil
+}
+
+func (w wordBag) add(word string) {
+	if w[len(word)] == nil {
+		w[len(word)] = make([]string, 0, 32)
+	}
+	w[len(word)] = append(w[len(word)], word)
+}
+
+func (w wordBag) lengths() []int {
+	lengths := make([]int, 0, len(w))
+	for length, _ := range w {
+		lengths = append(lengths, length)
+	}
+	return lengths
+}
+
+func (w wordBag) randomWordN(n int) string {
+	words, ok := w[n]
+	if ok {
+		return words[rand.Intn(len(words)-1)]
+	}
+	return ""
+}
+
+func (w wordBag) randomWordBelow(n int) string {
+	for {
+		s := w.randomWordN(rand.Intn(n))
+		if s != "" {
+			return s
+		}
+	}
+}
+
+func (w wordBag) wordString(n int) string {
+	var (
+		buf       bytes.Buffer
+		remaining int
+	)
+
+	for {
+		remaining = n - buf.Len()
+		switch {
+		case remaining < 0:
+			return buf.String()
+		case remaining < 8:
+			buf.WriteString(w.randomWordN(remaining))
+			buf.WriteRune(' ')
+		default:
+			buf.WriteString(w.randomWordBelow(remaining))
+			buf.WriteRune(' ')
+		}
+	}
+}
+
+// command-line length argument parsing type.  Line lengths can be specified as
+// either integers or strings, with strings naming known length-generating
+// functions.
 type lengthArg struct {
 	n      int
 	random bool
@@ -32,6 +114,7 @@ func (l *lengthArg) String() string {
 	return "length."
 }
 
+// used by the flag paackge for parsing line length args
 func (l *lengthArg) Set(v string) error {
 	if i, err := strconv.Atoi(v); err == nil {
 		*l = lengthArg{n: i}
@@ -51,27 +134,39 @@ func (l *lengthArg) mkLineFn() (func() string, error) {
 	if ts == nil {
 		ts = mkTsFn()
 	}
-	tsLen := len(ts())
-	if l.random {
-		return func() string {
-			return randomString(rand.Intn(80 - tsLen))
-		}, nil
-	}
 	if l.n == 0 {
 		l.n = 80
 	}
-	if !l.random && tsLen > l.n {
-		return nil, fmt.Errorf("line length %d is too small for timestamps like %s", l.n, ts())
+	tsLen := len(ts())
+	switch {
+	case words != nil && l.random:
+		return func() string {
+			return words.wordString(rand.Intn(80 - tsLen))
+		}, nil
+	case words != nil:
+		return func() string {
+			return words.wordString(l.n)
+		}, nil
+	case dictionary == "" && l.random:
+		return func() string {
+			return randomString(rand.Intn(80 - tsLen))
+		}, nil
+	case dictionary == "":
+		if tsLen > l.n {
+			return nil, fmt.Errorf("line length %d is too small for timestamps like %s", l.n, ts())
+		}
+		return func() string {
+			return randomString(l.n - tsLen)
+		}, nil
+	default:
+		return nil, fmt.Errorf("how did I even get here?")
 	}
-	return func() string {
-		return randomString(l.n - tsLen)
-	}, nil
 }
 
 // generates a pseudorandom string of length n that is composed of alphanumeric
 // characters.
 func randomString(n int) string {
-	var alpha = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	var alpha = "  abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	buf := make([]byte, n)
 	for i := 0; i < len(buf); i++ {
 		buf[i] = alpha[rand.Intn(len(alpha)-1)]
@@ -181,8 +276,25 @@ func mkTsFn() func() string {
 	}
 }
 
+func readDict(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("unable to read dictionary file: %s", err.Error())
+	}
+	defer f.Close()
+
+	words = make(wordBag, 32)
+	if err := words.readAll(f); err != nil {
+		return fmt.Errorf("error reading dictionary file: %s", err.Error())
+	}
+	return nil
+}
+
 func flags() (err error) {
 	flag.Parse()
+	if dictionary != "" {
+		readDict(dictionary)
+	}
 	ts = mkTsFn()
 	line, err = lineLength.mkLineFn()
 	return
@@ -208,6 +320,7 @@ func init() {
 	flag.StringVar(&tsformat, "ts-format", "", "timestamp format")
 	flag.StringVar(&pidfile, "pidfile", "", "file to which a pid is written")
 	flag.BoolVar(&ftruncate, "truncate", false, "truncate file on opening instead of appending")
+	flag.StringVar(&dictionary, "dict", "", "dictionary of words to use for generating log data")
 	flag.BoolVar(&reopen, "reopen", false, "reopen file handle on every write instead of using a persistent handle")
 	flag.Float64Var(&freq, "freq", 10, "frequency in hz at which lines will be written")
 	flag.Var(&lineLength, "line-length", "length of the lines to be generated (in bytes)")
