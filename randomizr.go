@@ -145,7 +145,7 @@ func (l *lengthArg) mkLineFn() (func() string, error) {
 		}, nil
 	case words != nil:
 		return func() string {
-			return words.wordString(l.n)
+			return words.wordString(l.n - tsLen)
 		}, nil
 	case dictionary == "" && l.random:
 		return func() string {
