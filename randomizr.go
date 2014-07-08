@@ -265,7 +265,7 @@ func mkTsFn() func() string {
 	case "ms":
 		return func() string {
 			t := time.Now()
-			return fmt.Sprintf("%d", t.UnixNano()/1e3)
+			return fmt.Sprintf("%d", t.UnixNano()/1e6)
 		}
 	case "epoch", "unix":
 		return func() string {
