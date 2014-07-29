@@ -88,28 +88,23 @@ func (w wordBag) randomWordBelow(n int) string {
 func (w wordBag) wordString(n int) string {
 	var (
 		buf       bytes.Buffer
-		remaining int
+		remaining = n
 	)
 
 	for {
-		remaining = n - buf.Len()
 		switch {
 		case remaining < 0:
 			return buf.String()
 		case remaining < 8:
 			buf.WriteString(w.randomWordN(remaining))
-			if rand.Float64() > 0.8 {
-				buf.WriteRune('\n')
-			} else {
-				buf.WriteRune(' ')
-			}
 		default:
-			buf.WriteString(w.randomWordBelow(remaining))
-			if rand.Float64() > 0.8 {
-				buf.WriteRune('\n')
-			} else {
-				buf.WriteRune(' ')
-			}
+			buf.WriteString(w.randomWordBelow(8))
+		}
+		remaining = n - buf.Len()
+		if multiline && remaining > 1 && rand.Float64() > 0.98 {
+			buf.WriteRune('\n')
+		} else {
+			buf.WriteRune(' ')
 		}
 	}
 }
