@@ -98,10 +98,18 @@ func (w wordBag) wordString(n int) string {
 			return buf.String()
 		case remaining < 8:
 			buf.WriteString(w.randomWordN(remaining))
-			buf.WriteRune(' ')
+			if rand.Float64() > 0.8 {
+				buf.WriteRune('\n')
+			} else {
+				buf.WriteRune(' ')
+			}
 		default:
 			buf.WriteString(w.randomWordBelow(remaining))
-			buf.WriteRune(' ')
+			if rand.Float64() > 0.8 {
+				buf.WriteRune('\n')
+			} else {
+				buf.WriteRune(' ')
+			}
 		}
 	}
 }
