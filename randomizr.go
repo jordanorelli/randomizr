@@ -23,7 +23,7 @@ var (
 	ftruncate  bool          // whether or not to truncate file on open
 	pidfile    string        // path of pidfile to write out
 	reopen     bool          // whether or not to reopen the file handle on every line write
-	nots       float64       // odds of generating a line without a timestamp. Should be between 0 and 1.
+	multiline  bool          // whether or not multiline messages are possible
 	tsformat   string        // timestamp format
 	lineLength lengthArg     // length of the lines to be generated
 	ts         func() string // function to get a timestamp string
@@ -171,6 +171,9 @@ func (l *lengthArg) mkLineFn() (func() string, error) {
 // characters.
 func randomString(n int) string {
 	var alpha = "  abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	if multiline {
+		alpha += "\n\n"
+	}
 	buf := make([]byte, n)
 	for i := 0; i < len(buf); i++ {
 		buf[i] = alpha[rand.Intn(len(alpha)-1)]
@@ -299,23 +302,7 @@ func flags() (err error) {
 	if dictionary != "" {
 		readDict(dictionary)
 	}
-	tmp := mkTsFn()
-	tsLen := len(tmp())
-	blank := make([]byte, tsLen)
-	for i := range blank {
-		blank[i] = ' '
-	}
-	whitespace := string(blank)
-	if nots > 0 {
-		ts = func() string {
-			if rand.Float64() < nots {
-				return whitespace
-			}
-			return tmp()
-		}
-	} else {
-		ts = tmp
-	}
+	ts = mkTsFn()
 	line, err = lineLength.mkLineFn()
 	return
 }
@@ -338,7 +325,7 @@ func main() {
 func init() {
 	flag.StringVar(&fname, "file", "", "destination file to which random data will be written")
 	flag.StringVar(&tsformat, "ts-format", "", "timestamp format")
-	flag.Float64Var(&nots, "no-ts", 0.0, "odds of generating a line without a timestamp")
+	flag.BoolVar(&multiline, "multiline", false, "whether or not multiline messages are possible")
 	flag.StringVar(&pidfile, "pidfile", "", "file to which a pid is written")
 	flag.BoolVar(&ftruncate, "truncate", false, "truncate file on opening instead of appending")
 	flag.StringVar(&dictionary, "dict", "", "dictionary of words to use for generating log data")
