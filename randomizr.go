@@ -23,6 +23,7 @@ var (
 	ftruncate  bool          // whether or not to truncate file on open
 	pidfile    string        // path of pidfile to write out
 	reopen     bool          // whether or not to reopen the file handle on every line write
+	stutter    time.Duration // amount of time to stutter when writing a line
 	multiline  bool          // whether or not multiline messages are possible
 	tsformat   string        // timestamp format
 	lineLength lengthArg     // length of the lines to be generated
@@ -318,7 +319,21 @@ func main() {
 	writePid()
 	c := make(chan string)
 
-	writeLines(c)
+	if stutter > 0 {
+		cc := make(chan string, 1)
+		go func() {
+			for line := range c {
+				n := rand.Intn(len(line))
+				left, right := line[:n], line[n:]
+				cc <- left
+				time.Sleep(stutter)
+				cc <- right
+			}
+		}()
+		writeLines(cc)
+	} else {
+		writeLines(c)
+	}
 
 	for _ = range time.Tick(time.Duration(1e9 / freq)) {
 		c <- fmt.Sprintf("%s %s\n", ts(), line())
@@ -331,6 +346,7 @@ func init() {
 	flag.BoolVar(&multiline, "multiline", false, "whether or not multiline messages are possible")
 	flag.StringVar(&pidfile, "pidfile", "", "file to which a pid is written")
 	flag.BoolVar(&ftruncate, "truncate", false, "truncate file on opening instead of appending")
+	flag.DurationVar(&stutter, "stutter", 0, "stutter for this amount of time when writing each line")
 	flag.StringVar(&dictionary, "dict", "", "dictionary of words to use for generating log data")
 	flag.BoolVar(&reopen, "reopen", false, "reopen file handle on every write instead of using a persistent handle")
 	flag.Float64Var(&freq, "freq", 10, "frequency in hz at which lines will be written")
